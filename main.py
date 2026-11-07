@@ -1,84 +1,99 @@
+import os
 import pickle
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 
-app = FastAPI(title="Karachi PM2.5 & AQI Forecasting API", version="1.0")
+app = FastAPI(
+    title="Multi-City PM2.5 & AQI Forecasting API",
+    version="2.0",
+    description=(
+        "API for PM2.5 and Air Quality forecasting across Karachi, Lahore,"
+        " Islamabad, and Multan."
+    ),
+)
 
-# Server start hotay hi saved dataframe ko load karna
-try:
-  df_results = pd.read_pickle("df_gbr_forecast_results.pkl")
-except Exception as e:
-  df_results = None
 
-# Model load karna (agar future mein live single-point prediction ki zaroorat paray)
-# try:
-#   with open("pm25_gbr_model.pkl", "rb") as f:
-#     loaded_model = pickle.load(f)
-# except Exception as e:
-#   loaded_model = None
+# City ke naam ke mutabiq data load karne ka helper function
+def load_city_data(city_name: str):
+  city_name = city_name.lower().strip()
 
-# Yakeen kar lein ke 'date' column datetime format mein ho
-df_results["date"] = pd.to_datetime(df_results["date"])
+  # City ke mutabiq file ka naam select karna
+  if city_name == "karachi":
+    file_path = "karachi_results.pkl"
+  elif city_name == "lahore":
+    file_path = "lahore_results.pkl"
+  elif city_name == "islamabad":
+    file_path = "islamabad_results.pkl"
+  elif city_name == "multan":
+    file_path = "multan_results.pkl"
+  else:
+    return None
+
+  # Check karna ke file server par mojood hai ya nahi
+  if not os.path.exists(file_path):
+    return None
+
+  try:
+    df = pd.read_pickle(file_path)
+    # Yakeen kar lein ke 'date' column datetime format mein ho
+    if "date" in df.columns:
+      df["date"] = pd.to_datetime(df["date"])
+    return df
+  except Exception as e:
+    return None
+
 
 @app.get("/")
 def read_root():
   return {
       "status": "Online",
-      "message": "Welcome to Karachi Air Quality Forecasting API",
+          "message": "Welcome to Multi-City Air Quality Forecasting API"
+          " (Karachi, Lahore, Islamabad, Multan)"
   }
 
 
-@app.get("/api/forecast/all")
-def get_all_forecasts():
-  """Android app ke liye poora historical aur predicted dataset return karta hai
-
-  jismein date, PM2.5, AQI level, color aur advice shamil hain.
-  """
+# 1. Poora data city ke lehaz se dekhne ke liye
+@app.get("/api/forecast/{city}/all")
+def get_all_forecasts(city: str):
+  df_results = load_city_data(city)
   if df_results is None:
-    raise HTTPException(status_code=404, detail="Dataset not found on server.")
-
-  # DataFrame ko JSON list of dictionaries mein convert karna
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            f"Dataset for city '{city}' not found or file is missing on server."
+        ),
+    )
   return df_results.to_dict(orient="records")
 
 
-# @app.get("/api/forecast/date/{target_date}")
-# def get_forecast_by_date(target_date: str):
-#   """Kisi specific date ke liye PM2.5 aur AQI details filter karke deta hai"""
-#   if df_results is None:
-#     raise HTTPException(status_code=404, detail="Dataset not found on server.")
-
-#   # Date column ke mutabiq filter karna
-#   filtered_df = df_results[df_results["date"].astype(str) == target_date]
-
-#   if filtered_df.empty:
-#     raise HTTPException(
-#         status_code=404, detail=f"No data found for date: {target_date}"
-#     )
-
-#   return filtered_df.to_dict(orient="records")
-
-
-# 1. Specific Date wise filter (Misal: 2026-10-15)
-@app.get("/api/forecast/date/{target_date}")
-def get_by_date(target_date: str):
+# 2. Specific Date wise filter (Misal: /api/forecast/karachi/date/2026-10-15)
+@app.get("/api/forecast/{city}/date/{target_date}")
+def get_by_date(city: str, target_date: str):
+  df_results = load_city_data(city)
   if df_results is None:
-    raise HTTPException(status_code=404, detail="Dataset not found on server.")
+    raise HTTPException(
+        status_code=404, detail=f"Dataset for city '{city}' not found."
+    )
 
   filtered = df_results[
       df_results["date"].dt.strftime("%Y-%m-%d") == target_date
   ]
   if filtered.empty:
     raise HTTPException(
-        status_code=404, detail=f"No data found for date {target_date}"
+        status_code=404,
+        detail=f"No data found for {city.capitalize()} on date {target_date}",
     )
   return filtered.to_dict(orient="records")
 
 
-# 2. Month wise filter (Misal: Year 2026 aur Month 10)
-@app.get("/api/forecast/month/{year}/{month}")
-def get_by_month(year: int, month: int):
+# 3. Month wise filter (Misal: /api/forecast/lahore/month/2026/10)
+@app.get("/api/forecast/{city}/month/{year}/{month}")
+def get_by_month(city: str, year: int, month: int):
+  df_results = load_city_data(city)
   if df_results is None:
-    raise HTTPException(status_code=404, detail="Dataset not found on server.")
+    raise HTTPException(
+        status_code=404, detail=f"Dataset for city '{city}' not found."
+    )
 
   filtered = df_results[
       (df_results["date"].dt.year == year)
@@ -86,37 +101,47 @@ def get_by_month(year: int, month: int):
   ]
   if filtered.empty:
     raise HTTPException(
-        status_code=404, detail=f"No data found for {year}-{month:02d}"
+        status_code=404,
+        detail=(
+            f"No data found for {city.capitalize()} in {year}-{month:02d}"
+        ),
     )
   return filtered.to_dict(orient="records")
 
 
-# 3. Year wise filter (Misal: 2026)
-@app.get("/api/forecast/year/{year}")
-def get_by_year(year: int):
+# 4. Year wise filter (Misal: /api/forecast/islamabad/year/2026)
+@app.get("/api/forecast/{city}/year/{year}")
+def get_by_year(city: str, year: int):
+  df_results = load_city_data(city)
   if df_results is None:
-    raise HTTPException(status_code=404, detail="Dataset not found on server.")
-  
+    raise HTTPException(
+        status_code=404, detail=f"Dataset for city '{city}' not found."
+    )
+
   filtered = df_results[df_results["date"].dt.year == year]
   if filtered.empty:
     raise HTTPException(
-        status_code=404, detail=f"No data found for year {year}"
+        status_code=404,
+        detail=f"No data found for {city.capitalize()} in year {year}",
     )
   return filtered.to_dict(orient="records")
 
 
-# 4. Day of the week wise filter (Misal: 'Monday', 'Friday')
-@app.get("/api/forecast/day/{day_name}")
-def get_by_day_name(day_name: str):
+# 5. Day of the week wise filter (Misal: /api/forecast/multan/day/monday)
+@app.get("/api/forecast/{city}/day/{day_name}")
+def get_by_day_name(city: str, day_name: str):
+  df_results = load_city_data(city)
   if df_results is None:
-    raise HTTPException(status_code=404, detail="Dataset not found on server.")
-  
-  # day_name jaise 'Monday', 'Tuesday'
+    raise HTTPException(
+        status_code=404, detail=f"Dataset for city '{city}' not found."
+    )
+
   filtered = df_results[
       df_results["date"].dt.day_name().str.lower() == day_name.lower()
   ]
   if filtered.empty:
     raise HTTPException(
-        status_code=404, detail=f"No data found for day {day_name}"
+        status_code=404,
+        detail=f"No data found for {city.capitalize()} on {day_name}",
     )
   return filtered.to_dict(orient="records")
