@@ -29,17 +29,24 @@ def load_city_results(city: str):
 
   file_name = CITY_FILES[city_key]
 
+# Current directory aur absolute path check karne ke liye
+  current_dir = os.getcwd()
+  full_path = os.path.join(current_dir, file_name)
+
+  print(f"Checking file at: {full_path}")  # Railway logs mein nazar aayega
+
   # Check karein ke file server par mojood hai ya nahi
   if not os.path.exists(file_name):
+    print(f"File NOT found at {full_path}")
     return None
 
   try:
-    df = pd.read_pickle(file_name)
-    # Yakeen kar lein ke 'date' column datetime format mein ho
+    df = pd.read_pickle(full_path)
     if "date" in df.columns:
       df["date"] = pd.to_datetime(df["date"])
     return df
   except Exception as e:
+    print(f"Error loading pickle: {e}")
     return None
 
 
@@ -52,7 +59,6 @@ def read_root():
   }
 
 
-# 1. Poora data city ke lehaz se dekhne ke liye
 @app.get("/api/forecast/{city}/all")
 def get_all_by_city(city: str):
   df_results = load_city_results(city)
@@ -61,7 +67,7 @@ def get_all_by_city(city: str):
         status_code=404,
         detail=(
             f"Dataset for city '{city}' not found or pickle file is missing on"
-            " server."
+            f" server. Current dir: {os.getcwd()}"
         ),
     )
   return df_results.to_dict(orient="records")
