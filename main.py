@@ -4,6 +4,7 @@ import pickle
 from fastapi import FastAPI, HTTPException, Query
 from typing import List, Optional
 from pydantic import BaseModel
+from datetime import datetime
 
 app = FastAPI(
     title="Multi-City PM2.5 & AQI Forecasting API",
@@ -211,20 +212,65 @@ def get_filtered_city_map_data(
     return response_list
 
 
-
-# Aapki Kotlin AirRequest data class ka Python counterpart
 class AirRequest(BaseModel):
     pm25: float
 
-# Aapki Kotlin AirResponse data class ka Python counterpart
 class AirResponse(BaseModel):
     date: str
+    country: str
+    city: str
     latitude: float
     longitude: float
     pm25: float
     level: str
     color: str
     advice: str
+
+
+
+@app.post("/api/predict", response_model=AirResponse)
+def predict_air_quality(request: AirRequest):
+    pm25_val = request.pm25
+    
+    # EPA Breakpoints ke mutabiq AQI category, color aur advice determine karna
+    if pm25_val <= 12.0:
+        level = "Good"
+        color = "#4CAF50"
+        advice = "Air quality is satisfactory, and air pollution poses little or no risk."
+    elif pm25_val <= 35.4:
+        level = "Moderate"
+        color = "#FFC107"
+        advice = "Acceptable air quality; sensitive individuals may experience minor irritation."
+    elif pm25_val <= 55.4:
+        level = "Unhealthy for Sensitive Groups"
+        color = "#FF9800"
+        advice = "Sensitive groups may experience health effects. General public is less likely to be affected."
+    elif pm25_val <= 150.4:
+        level = "Unhealthy"
+        color = "#F44336"
+        advice = "Everyone may begin to experience health effects; sensitive groups may experience severe effects."
+    elif pm25_val <= 250.4:
+        level = "Very Unhealthy"
+        color = "#9C27B0"
+        advice = "Health alert: everyone may experience more serious health effects."
+    elif pm25_val <= 350.4:
+        level = "Hazardous"
+        color = "#795548"
+        advice = "Health warnings of emergency conditions. The entire population is likely to be affected."
+    else:
+        level = "Hazardous"
+        color = "#7E0023"
+        advice = "Serious health alert: stay indoors."
+
+    return {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "latitude": 24.8607,
+        "longitude": 67.0011,
+        "pm25": round(float(pm25_val), 2),
+        "level": level,
+        "color": color,
+        "advice": advice
+    }
 
 
 @app.get("/api/forecast/{city}/all")
