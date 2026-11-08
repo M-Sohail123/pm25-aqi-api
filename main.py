@@ -1,7 +1,9 @@
 import os
 import pandas as pd
 import pickle
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from typing import List, Optional
+from pydantic import BaseModel
 
 app = FastAPI(
     title="Multi-City PM2.5 & AQI Forecasting API",
@@ -49,6 +51,16 @@ def load_city_results(city: str):
     print(f"Error loading pickle: {e}")
     return None
 
+# Aapki nayi MapData class ke mutabiq Pydantic model
+class MapDataResponse(BaseModel):
+    latitude: float
+    longitude: float
+    pm25: float
+    date: str
+    level: str
+    color: str
+    advice: str
+    aqi: float
 
 @app.get("/")
 def read_root():
@@ -57,6 +69,162 @@ def read_root():
           "message": "Welcome to Multi-City Air Quality Forecasting API."
           " Supported cities: karachi, lahore, islamabad, multan"
   }
+
+
+@app.get("/api/forecast/{city}/analytics")
+def get_filtered_city_analytics(
+    city: str,
+    filter_type: Optional[str] = Query(None, description="e.g., 'weekly', 'monthly', or specific date 'YYYY-MM-DD'"),
+    start_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD")
+):
+    df = load_city_results(city)
+    
+    if df is None:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Dataset for city '{city}' not found or pickle file is missing on server."
+        )
+    
+    # Column name detect karna (aqi ya predicted_pm25)
+    val_col = 'aqi' if 'aqi' in df.columns else ('predicted_pm25' if 'predicted_pm25' in df.columns else df.columns[-1])
+    
+    if 'date' in df.columns:
+        df = df.sort_values('date')
+        
+        # 1. Custom Date Range Filter (Agar start_date aur end_date di gayi ho)
+        if start_date and end_date:
+            df = df[(df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))]
+        
+        # 2. Specific Filter Type (Jaise Spinner ya dropdown ki value ke mutabiq)
+        elif filter_type:
+            filter_lower = filter_type.lower().strip()
+            if filter_lower == "last 7 days" or filter_lower == "weekly":
+                df = df.tail(7)
+            elif filter_lower == "last 30 days" or filter_lower == "monthly":
+                df = df.tail(30)
+            elif len(filter_lower) == 10:  # Agar koi exact date pass ki ho e.g., "2026-11-08"
+                df = df[df['date'].dt.strftime('%Y-%m-%d') == filter_lower]
+
+        if df.empty:
+            raise HTTPException(status_code=404, detail="No records found for the given filter criteria.")
+            
+        dates_list = df['date'].dt.strftime('%Y-%m-%d').tolist()
+    else:
+        dates_list = [str(i) for i in range(len(df))]
+        
+    aqi_values = df[val_col].astype(float).tolist()
+    
+    # Statistics calculations on filtered data
+    avg_aqi = float(df[val_col].mean())
+    max_aqi = float(df[val_col].max())
+    min_aqi = float(df[val_col].min())
+    
+    return {
+        "average_aqi": round(avg_aqi, 2),
+        "max_aqi": round(max_aqi, 2),
+        "min_aqi": round(min_aqi, 2),
+        "aqi_values": aqi_values,
+        "dates": dates_list
+    }
+
+
+@app.get("/api/forecast/{city}/map-data", response_model=List[MapDataResponse])
+def get_filtered_city_map_data(
+    city: str,
+    filter_type: Optional[str] = Query(None, description="e.g., 'weekly', 'monthly', or specific date 'YYYY-MM-DD'"),
+    start_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD")
+):
+    city_key = city.lower().strip()
+    if city_key not in CITY_FILES:
+        raise HTTPException(status_code=404, detail=f"City '{city}' is not supported.")
+    
+    df = load_city_results(city_key)  # Cached function
+    if df is None:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Dataset for city '{city}' not found or pickle file is missing on server."
+        )
+    
+    filtered_df = df.copy()
+    
+    # Date & Filter Logic (Analytics ki tarah same filtering)
+    if 'date' in filtered_df.columns:
+        filtered_df = filtered_df.sort_values('date')
+        
+        if start_date and end_date:
+            filtered_df = filtered_df[
+                (filtered_df['date'] >= pd.to_datetime(start_date)) & 
+                (filtered_df['date'] <= pd.to_datetime(end_date))
+            ]
+        elif filter_type:
+            filter_lower = filter_type.lower().strip()
+            if filter_lower == "last 7 days" or filter_lower == "weekly":
+                filtered_df = filtered_df.tail(7)
+            elif filter_lower == "last 30 days" or filter_lower == "monthly":
+                filtered_df = filtered_df.tail(30)
+            elif len(filter_lower) == 10:  # Exact date format like "2026-11-08"
+                filtered_df = filtered_df[filtered_df['date'].dt.strftime('%Y-%m-%d') == filter_lower]
+
+        if filtered_df.empty:
+            raise HTTPException(status_code=404, detail="No map records found for the given filter criteria.")
+    
+    # Default coordinates agar dataframe mein lat/lon na hon
+    default_coords = {
+        "karachi": (24.8607, 67.0011),
+        "lahore": (31.5497, 74.3436),
+        "islamabad": (33.6844, 73.0479),
+        "multan": (30.1575, 71.5249)
+    }
+    
+    lat_val = float(filtered_df['latitude'].iloc[0]) if 'latitude' in filtered_df.columns else default_coords.get(city_key, (0.0, 0.0))[0]
+    lon_val = float(filtered_df['longitude'].iloc[0]) if 'longitude' in filtered_df.columns else default_coords.get(city_key, (0.0, 0.0))[1]
+    
+    # PM2.5 column detection
+    pm_col = next((col for col in ['pm25', 'predicted_pm25', 'value'] if col in filtered_df.columns), filtered_df.columns[-1])
+    
+    response_list = []
+    for _, row in filtered_df.iterrows():
+        pm_val = float(row.get(pm_col, 0.0))
+        
+        # DataFrame ke apne columns se values uthana (agar column mojood na ho toh fallback values)
+        level_val = str(row.get('level', 'Moderate'))
+        color_val = str(row.get('color', '#FFC107'))
+        advice_val = str(row.get('advice', 'Standard air quality precautions apply.'))
+        aqi_val = float(row.get('aqi', 0.0))
+
+            
+        date_str = row['date'].strftime('%Y-%m-%d') if 'date' in filtered_df.columns and pd.notnull(row['date']) else "N/A"
+        
+        response_list.append({
+            "latitude": lat_val,
+            "longitude": lon_val,
+            "pm25": round(pm_val, 2),
+            "date": date_str,
+            "level": level_val,
+            "color": color_val,
+            "advice": advice_val,
+            "aqi": aqi_val
+        })
+        
+    return response_list
+
+
+
+# Aapki Kotlin AirRequest data class ka Python counterpart
+class AirRequest(BaseModel):
+    pm25: float
+
+# Aapki Kotlin AirResponse data class ka Python counterpart
+class AirResponse(BaseModel):
+    date: str
+    latitude: float
+    longitude: float
+    pm25: float
+    level: str
+    color: str
+    advice: str
 
 
 @app.get("/api/forecast/{city}/all")
