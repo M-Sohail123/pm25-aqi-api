@@ -178,8 +178,8 @@ def get_filtered_city_map_data(
         "multan": (30.1575, 71.5249)
     }
     
-    lat_val = float(filtered_df['latitude'].iloc[0]) if 'latitude' in filtered_df.columns else default_coords.get(city_key, (0.0, 0.0))[0]
-    lon_val = float(filtered_df['longitude'].iloc[0]) if 'longitude' in filtered_df.columns else default_coords.get(city_key, (0.0, 0.0))[1]
+    lat_val = float(filtered_df['original_latitude'].iloc[0]) if 'original_latitude' in filtered_df.columns else default_coords.get(city_key, (0.0, 0.0))[0]
+    lon_val = float(filtered_df['original_longitude'].iloc[0]) if 'original_longitude' in filtered_df.columns else default_coords.get(city_key, (0.0, 0.0))[1]
     
     # PM2.5 column detection
     pm_col = next((col for col in ['pm25', 'predicted_pm25', 'value'] if col in filtered_df.columns), filtered_df.columns[-1])
