@@ -75,9 +75,7 @@ def read_root():
 @app.get("/api/forecast/{city}/analytics")
 def get_filtered_city_analytics(
     city: str,
-    filter_type: Optional[str] = Query(None, description="e.g., 'weekly', 'monthly', or specific date 'YYYY-MM-DD'"),
-    # start_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD"),
-    # end_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD")
+    filter_type: str
 ):
     df = load_city_results(city)
     
