@@ -4,7 +4,7 @@ import pickle
 from fastapi import FastAPI, HTTPException, Query
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = FastAPI(
     title="Multi-City PM2.5 & AQI Forecasting API",
@@ -76,8 +76,8 @@ def read_root():
 def get_filtered_city_analytics(
     city: str,
     filter_type: Optional[str] = Query(None, description="e.g., 'weekly', 'monthly', or specific date 'YYYY-MM-DD'"),
-    start_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD"),
-    end_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD")
+    # start_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD"),
+    # end_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD")
 ):
     df = load_city_results(city)
     
@@ -94,16 +94,36 @@ def get_filtered_city_analytics(
         df = df.sort_values('date')
         
         # 1. Custom Date Range Filter (Agar start_date aur end_date di gayi ho)
-        if start_date and end_date:
-            df = df[(df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))]
+        # if start_date and end_date:
+        #     df = df[(df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))]
         
         # 2. Specific Filter Type (Jaise Spinner ya dropdown ki value ke mutabiq)
-        elif filter_type:
+        if filter_type:
             filter_lower = filter_type.lower().strip()
-            if filter_lower == "last 7 days" or filter_lower == "weekly":
-                df = df.tail(7)
-            elif filter_lower == "last 30 days" or filter_lower == "monthly":
-                df = df.tail(30)
+            if filter_lower == "all":
+                # Do nothing, keep the full dataframe
+                pass
+
+            elif filter_lower == "yearly" or filter_lower == "year":
+                # Filter rows for the current year (or max year present in data)
+                current_year = datetime.now().year
+                df = df[df['date'].dt.year == current_year]
+
+            elif filter_lower == "today":
+                # Filter for today's exact date
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                df = df[df['date'].dt.strftime('%Y-%m-%d') == today_str]
+
+            elif filter_lower == "weekly" or filter_lower == "last 7 days":
+                # Filter for the last 7 days from today
+                week_ago = datetime.now() - timedelta(days=7)
+                df = df[df['date'] >= week_ago]
+
+            elif filter_lower == "month" or filter_lower == "monthly":
+                current_year = datetime.now().year
+                current_month = datetime.now().month
+                df = df[(df['date'].dt.year == current_year) & (df['date'].dt.month == current_month)]
+
             elif len(filter_lower) == 10:  # Agar koi exact date pass ki ho e.g., "2026-11-08"
                 df = df[df['date'].dt.strftime('%Y-%m-%d') == filter_lower]
 
@@ -134,8 +154,8 @@ def get_filtered_city_analytics(
 def get_filtered_city_map_data(
     city: str,
     filter_type: Optional[str] = Query(None, description="e.g., 'weekly', 'monthly', or specific date 'YYYY-MM-DD'"),
-    start_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD"),
-    end_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD")
+    # start_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD"),
+    # end_date: Optional[str] = Query(None, description="Format: YYYY-MM-DD")
 ):
     city_key = city.lower().strip()
     if city_key not in CITY_FILES:
@@ -154,18 +174,38 @@ def get_filtered_city_map_data(
     if 'date' in filtered_df.columns:
         filtered_df = filtered_df.sort_values('date')
         
-        if start_date and end_date:
-            filtered_df = filtered_df[
-                (filtered_df['date'] >= pd.to_datetime(start_date)) & 
-                (filtered_df['date'] <= pd.to_datetime(end_date))
-            ]
-        elif filter_type:
+        # if start_date and end_date:
+        #     filtered_df = filtered_df[
+        #         (filtered_df['date'] >= pd.to_datetime(start_date)) & 
+        #         (filtered_df['date'] <= pd.to_datetime(end_date))
+        #     ]
+        if filter_type:
             filter_lower = filter_type.lower().strip()
-            if filter_lower == "last 7 days" or filter_lower == "weekly":
-                filtered_df = filtered_df.tail(7)
-            elif filter_lower == "last 30 days" or filter_lower == "monthly":
-                filtered_df = filtered_df.tail(30)
-            elif len(filter_lower) == 10:  # Exact date format like "2026-11-08"
+            if filter_lower == "all":
+                # Do nothing, keep the full dataframe
+                pass
+
+            elif filter_lower == "yearly" or filter_lower == "year":
+                # Filter rows for the current year (or max year present in data)
+                current_year = datetime.now().year
+                filtered_df = filtered_df[filtered_df['date'].dt.year == current_year]
+
+            elif filter_lower == "today":
+                # Filter for today's exact date
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                filtered_df = filtered_df[filtered_df['date'].dt.strftime('%Y-%m-%d') == today_str]
+
+            elif filter_lower == "weekly" or filter_lower == "last 7 days":
+                # Filter for the last 7 days from today
+                week_ago = datetime.now() - timedelta(days=7)
+                filtered_df = filtered_df[filtered_df['date'] >= week_ago]
+
+            elif filter_lower == "month" or filter_lower == "monthly":
+                current_year = datetime.now().year
+                current_month = datetime.now().month
+                filtered_df = filtered_df[(filtered_df['date'].dt.year == current_year) & (filtered_df['date'].dt.month == current_month)]
+
+            elif len(filter_lower) == 10:  # Agar koi exact date pass ki ho e.g., "2026-11-08"
                 filtered_df = filtered_df[filtered_df['date'].dt.strftime('%Y-%m-%d') == filter_lower]
 
         if filtered_df.empty:
