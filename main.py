@@ -61,7 +61,7 @@ class MapDataResponse(BaseModel):
     level: str
     color: str
     advice: str
-    aqi: float
+    aqi: int
 
 @app.get("/")
 def read_root():
@@ -193,7 +193,7 @@ def get_filtered_city_map_data(
         level_val = str(row.get('level', 'Moderate'))
         color_val = str(row.get('color', '#FFC107'))
         advice_val = str(row.get('advice', 'Standard air quality precautions apply.'))
-        aqi_val = float(row.get('aqi', 0.0))
+        aqi_val = int(row.get('aqi', 0))
 
             
         date_str = row['date'].strftime('%Y-%m-%d') if 'date' in filtered_df.columns and pd.notnull(row['date']) else "N/A"
@@ -210,9 +210,8 @@ def get_filtered_city_map_data(
         })
         
     return response_list
-
-
 class AirRequest(BaseModel):
+    city: str
     pm25: float
 
 class AirResponse(BaseModel):
@@ -222,17 +221,53 @@ class AirResponse(BaseModel):
     latitude: float
     longitude: float
     pm25: float
+    aqi: int
     level: str
     color: str
     advice: str
 
-
+# EPA PM2.5 to AQI calculation function
+def calculate_aqi_from_pm25(pm25):
+    # EPA breakpoints table for PM2.5 (ug/m3) to AQI
+    breakpoints = [
+        (0.0, 12.0, 0, 50),
+        (12.1, 35.4, 51, 100),
+        (35.5, 55.4, 101, 150),
+        (55.5, 150.4, 151, 200),
+        (150.5, 250.4, 201, 300),
+        (250.5, 350.4, 301, 400),
+        (350.5, 500.4, 401, 500)
+    ]
+    
+    for (lo, hi, aqi_lo, aqi_hi) in breakpoints:
+        if lo <= pm25 <= hi:
+            # Linear interpolation formula
+            aqi = ((aqi_hi - aqi_lo) / (hi - lo)) * (pm25 - lo) + aqi_lo
+            return int(round(aqi))
+            
+    # Agar value 500.4 se zyada ho
+    if pm25 > 500.4:
+        return 500
+    return 0
 
 @app.post("/api/predict", response_model=AirResponse)
 def predict_air_quality(request: AirRequest):
+    city_name = request.city.strip().lower()
     pm25_val = request.pm25
     
-    # EPA Breakpoints ke mutabiq AQI category, color aur advice determine karna
+    # City coordinates mapping
+    city_coords = {
+        "karachi": (24.8607, 67.0011),
+        "lahore": (31.5497, 74.3436),
+        "islamabad": (33.6844, 73.0479)
+    }
+    
+    lat, lon = city_coords.get(city_name, (24.8607, 67.0011))
+
+    # Calculate AQI score
+    calculated_aqi = calculate_aqi_from_pm25(pm25_val)
+
+    # EPA Categories & Advice based on PM2.5
     if pm25_val <= 12.0:
         level = "Good"
         color = "#4CAF50"
@@ -264,13 +299,17 @@ def predict_air_quality(request: AirRequest):
 
     return {
         "date": datetime.now().strftime("%Y-%m-%d"),
-        "latitude": 24.8607,
-        "longitude": 67.0011,
+        "country": "Pakistan",
+        "city": city_name.capitalize(),
+        "latitude": lat,
+        "longitude": lon,
         "pm25": round(float(pm25_val), 2),
+        "aqi": calculated_aqi,  # <--- Return calculated AQI score
         "level": level,
         "color": color,
         "advice": advice
     }
+
 
 
 @app.get("/api/forecast/{city}/all")
